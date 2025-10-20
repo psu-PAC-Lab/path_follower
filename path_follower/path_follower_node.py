@@ -5,7 +5,7 @@ from rclpy.node import Node
 
 import geometry_msgs.msg
 import nav_msgs.msg
-import planning_interfaces.msg
+import dyn_ctrl_msgs.msg
 
 def quat_2_heading(q):
     return np.arctan2(2*(q.w*q.z + q.x*q.y), 1-2*(q.y**2 + q.z**2))
@@ -18,8 +18,8 @@ class PathFollower(Node):
         super().__init__('path_follower')
 
         # subscribers
-        self.motion_plan_sub = self.create_subscription(planning_interfaces.msg.MotionPlan, '/planning/motion_plan', self.motion_plan_callback, 10)
-        self.odom_sub = self.create_subscription(nav_msgs.msg.Odometry, '/nav/odom', self.odom_callback, 10)
+        self.motion_plan_sub = self.create_subscription(dyn_ctrl_msgs.msg.RigidBodyTraj, '/motion_plan', self.motion_plan_callback, 10)
+        self.odom_sub = self.create_subscription(nav_msgs.msg.Odometry, '/odom', self.odom_callback, 10)
 
         # publishers
         self.twist_pub = self.create_publisher(geometry_msgs.msg.Twist, '/cmd_vel', 10)
@@ -78,19 +78,21 @@ class PathFollower(Node):
 
     def motion_plan_callback(self, msg):
         # get position, velocity, heading, heading rate from motion plan
-        self.x_plan = np.zeros((len(msg.poses),))
-        self.y_plan = np.zeros((len(msg.poses),))
-        self.v_plan = np.zeros((len(msg.poses),))
-        self.th_plan = np.zeros((len(msg.poses),))
-        self.om_plan = np.zeros((len(msg.poses),))
-        self.t_plan = np.zeros((len(msg.poses),))
-        for i in range(len(msg.poses)):
-            self.x_plan[i] = msg.poses[i].position.x
-            self.y_plan[i] = msg.poses[i].position.y
-            self.v_plan[i] = msg.twists[i].linear.x
-            self.th_plan[i] = quat_2_heading(msg.poses[i].orientation)
-            self.om_plan[i] = msg.twists[i].angular.z
-            self.t_plan[i] = builtin_time_2_time(msg.times[i])
+        N = len(msg.traj)
+
+        self.x_plan = np.zeros((N,))
+        self.y_plan = np.zeros((N,))
+        self.v_plan = np.zeros((N,))
+        self.th_plan = np.zeros((N,))
+        self.om_plan = np.zeros((N,))
+        self.t_plan = np.zeros((N,))
+        for i in range(N):
+            self.x_plan[i] = msg.traj[i].pose.position.x
+            self.y_plan[i] = msg.traj[i].pose.position.y
+            self.v_plan[i] = msg.traj[i].twist.linear.x
+            self.th_plan[i] = quat_2_heading(msg.traj[i].pose.orientation)
+            self.om_plan[i] = msg.traj[i].twist.angular.z
+            self.t_plan[i] = builtin_time_2_time(msg.traj[i].header.stamp)
 
     def odom_callback(self, msg):
         # get current position, velocity, heading, heading rate

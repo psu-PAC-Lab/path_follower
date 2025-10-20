@@ -15,7 +15,7 @@
   <depend>rclpy</depend>
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
-  <depend>planning_interfaces</depend>
+  <depend>dyn_ctrl_msgs</depend>
 
   <export>
     <build_type>ament_python</build_type>
