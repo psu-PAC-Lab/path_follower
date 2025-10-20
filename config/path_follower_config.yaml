@@ -1,0 +1,8 @@
+/control/path_follower:
+  ros__parameters:
+    kth: 1.5 # heading gain
+    kt: 1.9 # proportional tangential error gain
+    kn: 0.6 # proportional cross-track error gain
+    dT: 0.02 # control period
+    v_min: 0.025 # speed threshold for low-speed control laws
+    logging_file: 'dyn_state_logging.txt'

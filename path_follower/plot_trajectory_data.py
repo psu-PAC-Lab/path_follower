@@ -1,0 +1,69 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import sys
+
+# get file name
+filename = sys.argv[1]
+
+# read data
+t = np.array([])
+x = np.array([])
+y = np.array([])
+v = np.array([])
+th = np.array([])
+om = np.array([])
+x_r = np.array([])
+y_r = np.array([])
+v_r = np.array([])
+th_r = np.array([])
+om_r = np.array([])
+v_cmd = np.array([])
+th_cmd = np.array([])
+om_cmd = np.array([])
+
+
+with open(filename, 'r') as f:
+    lines = f.readlines()
+    for line in lines:
+        data = line.split(' ')
+        t = np.append(t, float(data[0]))
+        x = np.append(x, float(data[1]))
+        y = np.append(y, float(data[2]))
+        v = np.append(v, float(data[3]))
+        th = np.append(th, float(data[4]))
+        om = np.append(om, float(data[5]))
+        x_r = np.append(x_r, float(data[6]))
+        y_r = np.append(y_r, float(data[7]))
+        v_r = np.append(v_r, float(data[8]))
+        th_r = np.append(th_r, float(data[9]))
+        om_r = np.append(om_r, float(data[10]))
+        v_cmd = np.append(v_cmd, float(data[11]))
+        th_cmd = np.append(th_cmd, float(data[12]))
+        om_cmd = np.append(om_cmd, float(data[13]))
+
+# zero time
+t = t - t[0]
+
+# plot
+fig, axs = plt.subplots(3,1)
+        
+axs[0].plot(t, v_r, '-g')
+axs[0].plot(t, v_cmd, '--r')
+axs[0].plot(t, v, '-k')
+axs[0].set_ylabel('v [m/s]')
+axs[0].set_title('Velocity')
+
+axs[1].plot(t, th_r*(180.0/np.pi), '-g')
+axs[1].plot(t, th_cmd*(180.0/np.pi), '--r')
+axs[1].plot(t, th*(180.0/np.pi), '-k')
+axs[1].set_ylabel('theta [deg]')
+axs[1].set_title('Heading')
+
+axs[2].plot(t, om_r*(180.0/np.pi), '-g')
+axs[2].plot(t, om_cmd*(180.0/np.pi), '--r')
+axs[2].plot(t, om*(180.0/np.pi), '-k')
+axs[2].set_ylabel('omega [deg/s]')
+axs[2].set_title('Turn Rate')
+axs[2].set_xlabel('Time [s]')
+
+plt.show()
