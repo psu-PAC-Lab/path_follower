@@ -1,4 +1,4 @@
-path_follower:
+/rosbot3/path_follower:
   ros__parameters:
     kth: 1.5 # heading gain
     kt: 1.9 # proportional tangential error gain

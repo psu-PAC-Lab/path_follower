@@ -5,6 +5,7 @@ from launch import LaunchDescription
 from launch_ros.actions import Node
 
 def generate_launch_description():
+    # Load the main config file
     config = os.path.join(
         get_package_share_directory('path_follower'),
         'config',
@@ -16,7 +17,6 @@ def generate_launch_description():
             package='path_follower',
             executable='path_follower',
             name='path_follower',
-            namespace='control',
             output='screen',
             parameters=[config]
         )

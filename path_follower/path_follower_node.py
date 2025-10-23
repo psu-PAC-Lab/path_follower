@@ -18,11 +18,11 @@ class PathFollower(Node):
         super().__init__('path_follower')
 
         # subscribers
-        self.motion_plan_sub = self.create_subscription(dyn_ctrl_msgs.msg.RigidBodyTraj, '/motion_plan', self.motion_plan_callback, 10)
-        self.odom_sub = self.create_subscription(nav_msgs.msg.Odometry, '/odom', self.odom_callback, 10)
+        self.motion_plan_sub = self.create_subscription(dyn_ctrl_msgs.msg.RigidBodyTraj, 'motion_plan', self.motion_plan_callback, 10)
+        self.odom_sub = self.create_subscription(nav_msgs.msg.Odometry, 'mocap', self.odom_callback, 10)
 
         # publishers
-        self.twist_pub = self.create_publisher(geometry_msgs.msg.Twist, '/cmd_vel', 10)
+        self.twist_pub = self.create_publisher(geometry_msgs.msg.Twist, 'cmd_vel', 10)
 
         # parameters
         self.declare_parameter('kth', 0.0)
