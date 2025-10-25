@@ -5,6 +5,6 @@
     kn: 0.6 # proportional cross-track error gain
     dT: 0.02 # control period
     v_min: 0.025 # speed threshold for low-speed control laws
-    logging_file: 'dyn_state_logging.txt'
+    logging_file: 'turtlebot_dyn_logging.txt'
     twist_stamped: 1
     use_sim_time: true

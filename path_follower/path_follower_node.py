@@ -101,6 +101,8 @@ class PathFollower(Node):
             self.om_plan[i] = msg.traj[i].state.twist.angular.z
             self.t_plan[i] = builtin_time_2_time(msg.traj[i].header.stamp)
 
+        self.get_logger().info(f'x_plan = {self.x_plan}, y_plan = {self.y_plan}, v_plan = {self.v_plan}, th_plan = {self.th_plan}, om_plan = {self.om_plan}')
+
     def odom_callback(self, msg):
         # get current position, velocity, heading, heading rate
         self.x = msg.pose.pose.position.x
@@ -116,11 +118,28 @@ class PathFollower(Node):
             return
 
         # get reference position, velocity, heading, heading rate
-        x_ref = np.interp(self.t, self.t_plan, self.x_plan)
-        y_ref = np.interp(self.t, self.t_plan, self.y_plan)
-        v_ref = np.interp(self.t, self.t_plan, self.v_plan)
-        th_ref = np.interp(self.t, self.t_plan, self.th_plan)
-        om_ref = np.interp(self.t, self.t_plan, self.om_plan)
+        if self.t > self.t_plan[-1]:
+            x_ref = self.x_plan[-1]
+            y_ref = self.y_plan[-1]
+            v_ref = 0.0
+            th_ref = self.th_plan[-1]
+            om_ref = 0.0
+
+            self.get_logger().info('Reached end of motion plan')
+        elif self.t < self.t_plan[0]:
+            x_ref = self.x_plan[0]
+            y_ref = self.y_plan[0]
+            v_ref = self.v_plan[0]
+            th_ref = self.th_plan[0]
+            om_ref = self.om_plan[0]
+
+            self.get_logger().info('Waiting for start of motion plan')
+        else:
+            x_ref = np.interp(self.t, self.t_plan, self.x_plan)
+            y_ref = np.interp(self.t, self.t_plan, self.y_plan)
+            v_ref = np.interp(self.t, self.t_plan, self.v_plan)
+            th_ref = np.interp(self.t, self.t_plan, self.th_plan)
+            om_ref = np.interp(self.t, self.t_plan, self.om_plan)
 
         self.get_logger().debug(f'x_ref = {x_ref}, y_ref = {y_ref}, v_ref = {v_ref}, th_ref = {th_ref}, om_ref = {om_ref}')
 
@@ -168,8 +187,6 @@ class PathFollower(Node):
             self.twist_pub.publish(twist_msg)
 
         # log
-        self.get_logger().info(f'commanding v = {v_cmd}, om = {om_cmd}')
-
         self.fid.write(f'{self.t} {self.x} {self.y} {self.v} {self.th} {self.om} {x_ref} {y_ref} {v_ref} {th_ref} {om_ref} {v_cmd} {th_cmd} {om_cmd} \n')
 
     def tangential_tracking_controller(self, e_t, v_ff, e_th):

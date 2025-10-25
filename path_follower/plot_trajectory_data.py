@@ -52,6 +52,7 @@ axs[0].plot(t, v_cmd, '--r')
 axs[0].plot(t, v, '-k')
 axs[0].set_ylabel('v [m/s]')
 axs[0].set_title('Velocity')
+axs[0].legend(['ref', 'cmd', 'actual'])
 
 axs[1].plot(t, th_r*(180.0/np.pi), '-g')
 axs[1].plot(t, th_cmd*(180.0/np.pi), '--r')
@@ -65,5 +66,31 @@ axs[2].plot(t, om*(180.0/np.pi), '-k')
 axs[2].set_ylabel('omega [deg/s]')
 axs[2].set_title('Turn Rate')
 axs[2].set_xlabel('Time [s]')
+
+# plot position states
+fig, axs = plt.subplots(2,1)
+axs[0].plot(t, x_r, '-g')
+axs[0].plot(t, x, '-k')
+axs[0].set_ylabel('X [m]')
+axs[0].set_title('X Position')
+axs[0].legend(['ref', 'actual'])
+
+axs[1].plot(t, y_r, '-g')
+axs[1].plot(t, y, '-k')
+axs[1].set_ylabel('Y [m]')
+axs[1].set_title('Y Position')
+axs[1].set_xlabel('Time [s]')
+
+
+# plot position trajectory
+fig, axs = plt.subplots(1,1)
+axs.plot(x_r, y_r, '-g')
+axs.plot(x, y, '-k')
+axs.set_xlabel('X [m]')
+axs.set_ylabel('Y [m]')
+axs.set_title('Position Trajectory')
+axs.set_aspect('equal', 'box')
+axs.legend(['ref', 'actual'])
+
 
 plt.show()
