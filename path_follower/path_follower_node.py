@@ -112,34 +112,46 @@ class PathFollower(Node):
         self.om = msg.twist.twist.angular.z
         self.t = builtin_time_2_time(msg.header.stamp)
 
+    @staticmethod
+    def heading_wrap(th):
+        if th > np.pi:
+            return th - 2*np.pi
+        elif th < -np.pi:
+            return th + 2*np.pi
+        else:
+            return th
+
+    @staticmethod
+    def heading_interp(t, t_vec, th_vec):
+        assert(len(t_vec) == len(th_vec))
+        assert(t[i+1] > t[i] for i in range(len(t_vec)-1))
+
+        # check clipping cases
+        if t < t_vec[0]:
+            return th_vec[0]
+        elif t > t_vec[-1]:
+            return th_vec[-1]
+
+        # interpolate with wrapping logic
+        for i in range(len(t_vec)-1):
+            if t_vec[i] <= t and t_vec[i+1] > t:
+                d_th = PathFollower.heading_wrap(th_vec[i+1] - th_vec[i])
+                d_t = (t_vec[i+1] - t_vec[i])
+                th_interp = th_vec[i] + (d_th / d_t) * (t - t_vec[i])
+                return PathFollower.heading_wrap(th_interp)
+                
+
     def timer_callback(self):
         if self.t_plan is None or self.x is None:
             self.get_logger().debug('Waiting for motion plan and odometry...')
             return
 
         # get reference position, velocity, heading, heading rate
-        if self.t > self.t_plan[-1]:
-            x_ref = self.x_plan[-1]
-            y_ref = self.y_plan[-1]
-            v_ref = 0.0
-            th_ref = self.th_plan[-1]
-            om_ref = 0.0
-
-            self.get_logger().info('Reached end of motion plan')
-        elif self.t < self.t_plan[0]:
-            x_ref = self.x_plan[0]
-            y_ref = self.y_plan[0]
-            v_ref = self.v_plan[0]
-            th_ref = self.th_plan[0]
-            om_ref = self.om_plan[0]
-
-            self.get_logger().info('Waiting for start of motion plan')
-        else:
-            x_ref = np.interp(self.t, self.t_plan, self.x_plan)
-            y_ref = np.interp(self.t, self.t_plan, self.y_plan)
-            v_ref = np.interp(self.t, self.t_plan, self.v_plan)
-            th_ref = np.interp(self.t, self.t_plan, self.th_plan)
-            om_ref = np.interp(self.t, self.t_plan, self.om_plan)
+        x_ref = np.interp(self.t, self.t_plan, self.x_plan)
+        y_ref = np.interp(self.t, self.t_plan, self.y_plan)
+        v_ref = np.interp(self.t, self.t_plan, self.v_plan)
+        th_ref = PathFollower.heading_interp(self.t, self.t_plan, self.th_plan)
+        om_ref = np.interp(self.t, self.t_plan, self.om_plan)
 
         self.get_logger().debug(f'x_ref = {x_ref}, y_ref = {y_ref}, v_ref = {v_ref}, th_ref = {th_ref}, om_ref = {om_ref}')
 
@@ -157,7 +169,8 @@ class PathFollower(Node):
         e_n = pos_ref_rot[1] - pos_rot[1]
 
         # get velocity setpoint
-        v_cmd = self.tangential_tracking_controller(e_t, v_ref, th_ref-self.th)
+        e_th = PathFollower.heading_wrap(th_ref - self.th)
+        v_cmd = self.tangential_tracking_controller(e_t, v_ref, e_th)
 
         # check for low speed control
         if np.abs(self.v) < self.v_min:
