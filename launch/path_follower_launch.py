@@ -9,7 +9,7 @@ def generate_launch_description():
     config = os.path.join(
         get_package_share_directory('path_follower'),
         'config',
-        'path_follower_config.yaml'
+        'rosbot2R_config.yaml'
     )
 
     return LaunchDescription([
