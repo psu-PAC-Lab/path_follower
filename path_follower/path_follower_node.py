@@ -101,7 +101,7 @@ class PathFollower(Node):
             self.om_plan[i] = msg.traj[i].state.twist.angular.z
             self.t_plan[i] = builtin_time_2_time(msg.traj[i].header.stamp)
 
-        self.get_logger().info(f'x_plan = {self.x_plan}, y_plan = {self.y_plan}, v_plan = {self.v_plan}, th_plan = {self.th_plan}, om_plan = {self.om_plan}')
+        # self.get_logger().info(f'x_plan = {self.x_plan}, y_plan = {self.y_plan}, v_plan = {self.v_plan}, th_plan = {self.th_plan}, om_plan = {self.om_plan}')
 
     def odom_callback(self, msg):
         # get current position, velocity, heading, heading rate
