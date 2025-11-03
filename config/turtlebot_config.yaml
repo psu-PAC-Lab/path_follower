@@ -4,7 +4,7 @@
     kt: 2.425 #2.116 #4.072 #0.5 # proportional tangential error gain
     kn: 0.538 #0.4046 #0.356 #0.28 # proportional cross-track error gain
     dT: 0.02 # control period
-    v_min: 0.1 # speed threshold for low-speed control laws
+    v_min: 0.02 # speed threshold for low-speed control laws
     logging_file: 'turtlebot_dyn_logging.txt'
     twist_stamped: 1
     use_sim_time: true

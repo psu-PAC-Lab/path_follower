@@ -20,7 +20,7 @@ class PathFollower(Node):
         # subscribers
         self.motion_plan_sub = self.create_subscription(dyn_ctrl_msgs.msg.RigidBodyTraj, 'motion_plan', self.motion_plan_callback, 10)
         self.odom_sub = self.create_subscription(nav_msgs.msg.Odometry, 'mocap', self.odom_callback, 10)
-
+        self.path_plan_sub = self.create_subscription(dyn_ctrl_msgs.msg.RigidBodyTraj, 'path_plan_rigid_body', self.path_plan_rigid_body_callback, 10)
 
         # parameters
         self.declare_parameter('kth', 0.0)
@@ -48,19 +48,20 @@ class PathFollower(Node):
 
         self.get_logger().info(f'Path follower params: kth = {self.kth}, kt = {self.kt}, kn = {self.kn}, dT = {self.dT}, v_min = {self.v_min}, twist-stamped = {self.twist_stamped}')
 
-        # spline objects
-        self.x_sp = None
-        self.y_sp = None
-        self.v_sp = None
-        self.th_sp = None
-        self.om_sp = None
-
+        # plan data
         self.t_plan = None
         self.x_plan = None
         self.y_plan = None
         self.v_plan = None
         self.th_plan = None
         self.om_plan = None
+
+        self.t_path_plan = None
+        self.x_path_plan = None
+        self.y_path_plan = None
+        self.v_path_plan = None
+        self.th_path_plan = None
+        self.om_path_plan = None
 
         # feedback
         self.t = None
@@ -102,6 +103,24 @@ class PathFollower(Node):
             self.t_plan[i] = builtin_time_2_time(msg.traj[i].header.stamp)
 
         # self.get_logger().info(f'x_plan = {self.x_plan}, y_plan = {self.y_plan}, v_plan = {self.v_plan}, th_plan = {self.th_plan}, om_plan = {self.om_plan}')
+
+    def path_plan_rigid_body_callback(self, msg):
+        # get position, velocity, heading, heading rate from path plan
+        N = len(msg.traj)
+
+        self.x_path_plan = np.zeros((N,))
+        self.y_path_plan = np.zeros((N,))
+        self.v_path_plan = np.zeros((N,))
+        self.th_path_plan = np.zeros((N,))
+        self.om_path_plan = np.zeros((N,))
+        self.t_path_plan = np.zeros((N,))
+        for i in range(N):
+            self.x_path_plan[i] = msg.traj[i].state.pose.position.x
+            self.y_path_plan[i] = msg.traj[i].state.pose.position.y
+            self.v_path_plan[i] = msg.traj[i].state.twist.linear.x
+            self.th_path_plan[i] = quat_2_heading(msg.traj[i].state.pose.orientation)
+            self.om_path_plan[i] = msg.traj[i].state.twist.angular.z
+            self.t_path_plan[i] = builtin_time_2_time(msg.traj[i].header.stamp)
 
     def odom_callback(self, msg):
         # get current position, velocity, heading, heading rate
@@ -153,6 +172,12 @@ class PathFollower(Node):
         th_ref = PathFollower.heading_interp(self.t, self.t_plan, self.th_plan)
         om_ref = np.interp(self.t, self.t_plan, self.om_plan)
 
+        x_path_plan = np.interp(self.t, self.t_path_plan, self.x_path_plan)
+        y_path_plan = np.interp(self.t, self.t_path_plan, self.y_path_plan)
+        v_path_plan = np.interp(self.t, self.t_path_plan, self.v_path_plan)
+        th_path_plan = PathFollower.heading_interp(self.t, self.t_path_plan, self.th_path_plan)
+        om_path_plan = np.interp(self.t, self.t_path_plan, self.om_path_plan)
+
         self.get_logger().debug(f'x_ref = {x_ref}, y_ref = {y_ref}, v_ref = {v_ref}, th_ref = {th_ref}, om_ref = {om_ref}')
 
         # get rotation matrix based on th_ref
@@ -200,7 +225,7 @@ class PathFollower(Node):
             self.twist_pub.publish(twist_msg)
 
         # log
-        self.fid.write(f'{self.t} {self.x} {self.y} {self.v} {self.th} {self.om} {x_ref} {y_ref} {v_ref} {th_ref} {om_ref} {v_cmd} {th_cmd} {om_cmd} \n')
+        self.fid.write(f'{self.t} {self.x} {self.y} {self.v} {self.th} {self.om} {x_ref} {y_ref} {v_ref} {th_ref} {om_ref} {v_cmd} {th_cmd} {om_cmd} {x_path_plan} {y_path_plan} {v_path_plan} {th_path_plan} {om_path_plan} \n')
 
     def tangential_tracking_controller(self, e_t, v_ff, e_th):
         v_cmd = self.kt*e_t*np.cos(e_th) + v_ff
