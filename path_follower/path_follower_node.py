@@ -18,11 +18,9 @@ class PathFollower(Node):
         super().__init__('path_follower')
 
         # subscribers
-        self.motion_plan_sub = self.create_subscription(dyn_ctrl_msgs.msg.RigidBodyTraj, '/motion_plan', self.motion_plan_callback, 10)
-        self.odom_sub = self.create_subscription(nav_msgs.msg.Odometry, '/odom', self.odom_callback, 10)
+        self.motion_plan_sub = self.create_subscription(dyn_ctrl_msgs.msg.RigidBodyTraj, 'motion_plan', self.motion_plan_callback, 10)
+        self.odom_sub = self.create_subscription(nav_msgs.msg.Odometry, 'mocap', self.odom_callback, 10)
 
-        # publishers
-        self.twist_pub = self.create_publisher(geometry_msgs.msg.Twist, '/cmd_vel', 10)
 
         # parameters
         self.declare_parameter('kth', 0.0)
@@ -31,6 +29,7 @@ class PathFollower(Node):
         self.declare_parameter('dT', 1.0)
         self.declare_parameter('v_min', 0.0)
         self.declare_parameter('logging_file', 'file.txt')
+        self.declare_parameter('twist_stamped',0)
 
         self.kth = self.get_parameter('kth').get_parameter_value().double_value
         self.kt = self.get_parameter('kt').get_parameter_value().double_value
@@ -38,8 +37,16 @@ class PathFollower(Node):
         self.dT = self.get_parameter('dT').get_parameter_value().double_value
         self.v_min = self.get_parameter('v_min').get_parameter_value().double_value
         self.logging_file = self.get_parameter('logging_file').get_parameter_value().string_value
+        self.twist_stamped = self.get_parameter('twist_stamped').get_parameter_value().integer_value
 
-        self.get_logger().info(f'Path follower params: kth = {self.kth}, kt = {self.kt}, kn = {self.kn}, dT = {self.dT}, v_min = {self.v_min}')
+
+        # publishers
+        if self.twist_stamped:
+            self.twist_pub = self.create_publisher(geometry_msgs.msg.TwistStamped, 'cmd_vel', 10)
+        else:
+            self.twist_pub = self.create_publisher(geometry_msgs.msg.Twist, 'cmd_vel', 10)
+
+        self.get_logger().info(f'Path follower params: kth = {self.kth}, kt = {self.kt}, kn = {self.kn}, dT = {self.dT}, v_min = {self.v_min}, twist-stamped = {self.twist_stamped}')
 
         # spline objects
         self.x_sp = None
@@ -87,12 +94,14 @@ class PathFollower(Node):
         self.om_plan = np.zeros((N,))
         self.t_plan = np.zeros((N,))
         for i in range(N):
-            self.x_plan[i] = msg.traj[i].pose.position.x
-            self.y_plan[i] = msg.traj[i].pose.position.y
-            self.v_plan[i] = msg.traj[i].twist.linear.x
-            self.th_plan[i] = quat_2_heading(msg.traj[i].pose.orientation)
-            self.om_plan[i] = msg.traj[i].twist.angular.z
+            self.x_plan[i] = msg.traj[i].state.pose.position.x
+            self.y_plan[i] = msg.traj[i].state.pose.position.y
+            self.v_plan[i] = msg.traj[i].state.twist.linear.x
+            self.th_plan[i] = quat_2_heading(msg.traj[i].state.pose.orientation)
+            self.om_plan[i] = msg.traj[i].state.twist.angular.z
             self.t_plan[i] = builtin_time_2_time(msg.traj[i].header.stamp)
+
+        # self.get_logger().info(f'x_plan = {self.x_plan}, y_plan = {self.y_plan}, v_plan = {self.v_plan}, th_plan = {self.th_plan}, om_plan = {self.om_plan}')
 
     def odom_callback(self, msg):
         # get current position, velocity, heading, heading rate
@@ -103,6 +112,35 @@ class PathFollower(Node):
         self.om = msg.twist.twist.angular.z
         self.t = builtin_time_2_time(msg.header.stamp)
 
+    @staticmethod
+    def heading_wrap(th):
+        if th > np.pi:
+            return th - 2*np.pi
+        elif th < -np.pi:
+            return th + 2*np.pi
+        else:
+            return th
+
+    @staticmethod
+    def heading_interp(t, t_vec, th_vec):
+        assert(len(t_vec) == len(th_vec))
+        assert(t[i+1] > t[i] for i in range(len(t_vec)-1))
+
+        # check clipping cases
+        if t < t_vec[0]:
+            return th_vec[0]
+        elif t > t_vec[-1]:
+            return th_vec[-1]
+
+        # interpolate with wrapping logic
+        for i in range(len(t_vec)-1):
+            if t_vec[i] <= t and t_vec[i+1] > t:
+                d_th = PathFollower.heading_wrap(th_vec[i+1] - th_vec[i])
+                d_t = (t_vec[i+1] - t_vec[i])
+                th_interp = th_vec[i] + (d_th / d_t) * (t - t_vec[i])
+                return PathFollower.heading_wrap(th_interp)
+                
+
     def timer_callback(self):
         if self.t_plan is None or self.x is None:
             self.get_logger().debug('Waiting for motion plan and odometry...')
@@ -112,7 +150,7 @@ class PathFollower(Node):
         x_ref = np.interp(self.t, self.t_plan, self.x_plan)
         y_ref = np.interp(self.t, self.t_plan, self.y_plan)
         v_ref = np.interp(self.t, self.t_plan, self.v_plan)
-        th_ref = np.interp(self.t, self.t_plan, self.th_plan)
+        th_ref = PathFollower.heading_interp(self.t, self.t_plan, self.th_plan)
         om_ref = np.interp(self.t, self.t_plan, self.om_plan)
 
         self.get_logger().debug(f'x_ref = {x_ref}, y_ref = {y_ref}, v_ref = {v_ref}, th_ref = {th_ref}, om_ref = {om_ref}')
@@ -131,7 +169,8 @@ class PathFollower(Node):
         e_n = pos_ref_rot[1] - pos_rot[1]
 
         # get velocity setpoint
-        v_cmd = self.tangential_tracking_controller(e_t, v_ref, th_ref-self.th)
+        e_th = PathFollower.heading_wrap(th_ref - self.th)
+        v_cmd = self.tangential_tracking_controller(e_t, v_ref, e_th)
 
         # check for low speed control
         if np.abs(self.v) < self.v_min:
@@ -152,11 +191,15 @@ class PathFollower(Node):
         twist_msg.angular.x = 0.0
         twist_msg.angular.y = 0.0
         twist_msg.angular.z = om_cmd
-        self.twist_pub.publish(twist_msg)
+        if self.twist_stamped:
+            twist_msg_stamped = geometry_msgs.msg.TwistStamped()
+            twist_msg_stamped.header.stamp = self.get_clock().now().to_msg()
+            twist_msg_stamped.twist = twist_msg
+            self.twist_pub.publish(twist_msg_stamped)
+        else:
+            self.twist_pub.publish(twist_msg)
 
         # log
-        self.get_logger().debug(f'commanding v = {v_cmd}, om = {om_cmd}')
-
         self.fid.write(f'{self.t} {self.x} {self.y} {self.v} {self.th} {self.om} {x_ref} {y_ref} {v_ref} {th_ref} {om_ref} {v_cmd} {th_cmd} {om_cmd} \n')
 
     def tangential_tracking_controller(self, e_t, v_ff, e_th):

@@ -1,7 +1,7 @@
 function sysid()
 
 % load data
-data_file = './dyn_state_logging.txt';
+data_file = './turtlebot_dyn_logging_10_27_2025.txt';
 data = readmatrix(data_file);
 t = data(:,1);
 x = data(:,2);
@@ -66,8 +66,8 @@ title('\omega')
 dt = mean(diff(t));
 
 % get selected portion of trajectory
-t_min = 2;
-t_max = 25;
+t_min = 64;
+t_max = 87;
 ind_min = find(t >= t_min, 1);
 ind_max = find(t >= t_max, 1);
 
