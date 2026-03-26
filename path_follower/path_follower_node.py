@@ -30,6 +30,8 @@ class PathFollower(Node):
         self.declare_parameter('v_min', 0.0)
         self.declare_parameter('logging_file', 'file.txt')
         self.declare_parameter('twist_stamped',0)
+        self.declare_parameter('is_ackermann', False)
+        self.declare_parameter('wheelbase', 0.0)
 
         self.kth = self.get_parameter('kth').get_parameter_value().double_value
         self.kt = self.get_parameter('kt').get_parameter_value().double_value
@@ -38,6 +40,8 @@ class PathFollower(Node):
         self.v_min = self.get_parameter('v_min').get_parameter_value().double_value
         self.logging_file = self.get_parameter('logging_file').get_parameter_value().string_value
         self.twist_stamped = self.get_parameter('twist_stamped').get_parameter_value().integer_value
+        self.is_ackermann = self.get_parameter('is_ackermann').get_parameter_value().bool_value
+        self.wheelbase = self.get_parameter('wheelbase').get_parameter_value().double_value
 
 
         # publishers
@@ -46,7 +50,7 @@ class PathFollower(Node):
         else:
             self.twist_pub = self.create_publisher(geometry_msgs.msg.Twist, 'cmd_vel', 10)
 
-        self.get_logger().info(f'Path follower params: kth = {self.kth}, kt = {self.kt}, kn = {self.kn}, dT = {self.dT}, v_min = {self.v_min}, twist-stamped = {self.twist_stamped}')
+        self.get_logger().info(f'Path follower params: kth = {self.kth}, kt = {self.kt}, kn = {self.kn}, dT = {self.dT}, v_min = {self.v_min}, twist-stamped = {self.twist_stamped}, is_ackermann = {self.is_ackermann}, wheelbase = {self.wheelbase}')
 
         # spline objects
         self.x_sp = None
@@ -223,10 +227,27 @@ class PathFollower(Node):
             e_th += 2*np.pi
 
         # compute control input
-        om_fb = self.kth*e_th
+        if(self.is_ackermann):
+            om_fb = np.arctan(self.kth*e_th*self.wheelbase/(self.v + 1e-9))
+        else:
+            om_fb = self.kth*e_th
         om_cmd = om_fb + om_ff
 
         return om_cmd
+    
+    # def heading_controller_ackermann(self, th_ref, th, om_ff):
+    #     # error
+    #     e_th = th_ref - th
+    #     if e_th > np.pi:
+    #         e_th -= 2*np.pi
+    #     elif e_th < -np.pi:
+    #         e_th += 2*np.pi
+
+    #     # compute control input
+    #     om_fb = np.arctan(self.kth*e_th*self.wheelbase/(self.v + 1e-9))
+    #     om_cmd = om_fb + om_ff
+
+    #     return om_cmd
 
 
 def main(args=None):

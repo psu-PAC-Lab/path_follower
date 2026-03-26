@@ -1,10 +1,12 @@
 /svea/path_follower:
   ros__parameters:
     kth: 0.512 #0.915 #0.56 # heading gain
-    kt: 0.377 #0.1 #0.0959 #0.16 # proportional tangential error gain
+    kt: 0.577 #0.1 #0.0959 #0.16 # proportional tangential error gain
     kn: 0.65 #0.187 #0.271 #0.16 # proportional cross-track error gain
     dT: 0.02 # control period
     v_min: 0.0 # speed threshold for low-speed control laws
     logging_file: 'svea_dyn_logging.txt'
     twist_stamped: 0
     use_sim_time: true
+    is_ackermann: true
+    wheelbase: 0.324
