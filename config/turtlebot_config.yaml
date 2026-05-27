@@ -1,13 +1,13 @@
-/turtlebot/path_follower:
+/svea/path_follower:
   ros__parameters:
-    # kth: 1.819 #1.38 #1.41 #1. # heading gain
-    # kt: 2.425 #2.116 #4.072 #0.5 # proportional tangential error gain
-    # kn: 0.538 #0.4046 #0.356 #0.28 # proportional cross-track error gain
-    kth: 0.7 # heading gain
-    kt: 0.7 # proportional tangential error gain
-    kn: 0.3 # proportional cross-track error gain
+    gamma: 1.0 # gamma > 0
+    beta: 2.1 # 2 < beta < h + 1
+    h: 1.5 # h > 1
     dT: 0.02 # control period
-    v_min: 0.02 # speed threshold for low-speed control laws
-    logging_file: 'turtlebot_dyn_logging.txt'
-    twist_stamped: 1
+    v_min: 0.0 # speed threshold for low-speed control laws
+    logging_file: 'svea_dyn_logging.txt'
+    twist_stamped: 0
     use_sim_time: true
+    is_ackermann: true
+    wheelbase: 0.324
+    max_steering_angle: 0.785 # 45 degrees in radians

@@ -32,6 +32,10 @@ class PathFollower(Node):
         self.declare_parameter('twist_stamped',0)
         self.declare_parameter('is_ackermann', False)
         self.declare_parameter('wheelbase', 0.0)
+        self.declare_parameter('max_steering_angle', 0.785)
+        self.declare_parameter('gamma', 0.0)
+        self.declare_parameter('beta', 0.0)
+        self.declare_parameter('h', 0.0)
 
         self.kth = self.get_parameter('kth').get_parameter_value().double_value
         self.kt = self.get_parameter('kt').get_parameter_value().double_value
@@ -42,6 +46,10 @@ class PathFollower(Node):
         self.twist_stamped = self.get_parameter('twist_stamped').get_parameter_value().integer_value
         self.is_ackermann = self.get_parameter('is_ackermann').get_parameter_value().bool_value
         self.wheelbase = self.get_parameter('wheelbase').get_parameter_value().double_value
+        self.max_steering_angle = self.get_parameter('max_steering_angle').get_parameter_value().double_value
+        self.gamma = self.get_parameter('gamma').get_parameter_value().double_value
+        self.beta = self.get_parameter('beta').get_parameter_value().double_value
+        self.h = self.get_parameter('h').get_parameter_value().double_value
 
 
         # publishers
@@ -177,15 +185,19 @@ class PathFollower(Node):
         v_cmd = self.tangential_tracking_controller(e_t, v_ref, e_th)
 
         # check for low speed control
-        if np.abs(self.v) < self.v_min:
-            th_cmd = self.th
-            om_cmd = 0.0
+        if self.is_ackermann:
+            v_cmd, phi_cmd = self.ackermann_controller(x_ref, y_ref, th_ref)
+            om_cmd = phi_cmd # in KTH code, angular velocity command is directly the steering angle command
         else:
-            # get heading setpoint
-            th_cmd = self.normal_tracking_controller(e_n, th_ref, self.v)
+            if np.abs(self.v) < self.v_min:
+                th_cmd = self.th
+                om_cmd = 0.0
+            else:
+                # get heading setpoint
+                th_cmd = self.normal_tracking_controller(e_n, th_ref, self.v)
 
-            # get turn rate setpoint
-            om_cmd = self.heading_controller(th_cmd, self.th, om_ref)
+                # get turn rate setpoint
+                om_cmd = self.heading_controller(th_cmd, self.th, om_ref)
 
         # publish twist message
         twist_msg = geometry_msgs.msg.Twist()
@@ -205,6 +217,26 @@ class PathFollower(Node):
 
         # log
         self.fid.write(f'{self.t} {self.x} {self.y} {self.v} {self.th} {self.om} {x_ref} {y_ref} {v_ref} {th_ref} {om_ref} {v_cmd} {th_cmd} {om_cmd} \n')
+
+    def ackermann_controller(self, x_ref, y_ref, th_ref):
+        """
+        From "Kinematic trajectory tracking controller for an all-terrain Ackermann steering vehicle"
+        by L. Bascetta, D. A. Cucci, M. Matteucci
+        """
+        delta_x = x_ref - self.x
+        delta_y = y_ref - self.y
+
+        e = np.sqrt(delta_x**2 + delta_y**2) + 1e-9
+        phi = PathFollower.heading_wrap(np.arctan2(delta_y, delta_x) - th_ref)
+        alpha = PathFollower.heading_wrap(phi - self.th + th_ref + 1e-9)
+
+        curvature = np.sin(alpha)/e + self.h*phi*np.sin(alpha)/(e*alpha) + self.beta*alpha/e
+
+        v_cmd = self.gamma*e
+        phi_cmd = np.arctan(self.wheelbase*curvature)
+        # clip steering angle command
+        phi_cmd = np.clip(phi_cmd, -self.max_steering_angle, self.max_steering_angle)
+        return v_cmd, phi_cmd
 
     def tangential_tracking_controller(self, e_t, v_ff, e_th):
         v_cmd = self.kt*e_t*np.cos(e_th) + v_ff
