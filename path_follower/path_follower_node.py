@@ -6,6 +6,7 @@ from rclpy.node import Node
 import geometry_msgs.msg
 import nav_msgs.msg
 import dyn_ctrl_msgs.msg
+import mavros_msgs.msg
 
 def quat_2_heading(q):
     return np.arctan2(2*(q.w*q.z + q.x*q.y), 1-2*(q.y**2 + q.z**2))
@@ -28,9 +29,11 @@ class PathFollower(Node):
         self.declare_parameter('kn', 0.0)
         self.declare_parameter('dT', 1.0)
         self.declare_parameter('v_min', 0.0)
+        self.declare_parameter('v_max', 1.0)
         self.declare_parameter('logging_file', 'file.txt')
         self.declare_parameter('twist_stamped',0)
         self.declare_parameter('is_ackermann', False)
+        self.declare_parameter('is_mavros_msg', False)
         self.declare_parameter('wheelbase', 0.0)
         self.declare_parameter('max_steering_angle', 0.785)
         self.declare_parameter('gamma', 0.0)
@@ -42,9 +45,11 @@ class PathFollower(Node):
         self.kn = self.get_parameter('kn').get_parameter_value().double_value
         self.dT = self.get_parameter('dT').get_parameter_value().double_value
         self.v_min = self.get_parameter('v_min').get_parameter_value().double_value
+        self.v_max = self.get_parameter('v_max').get_parameter_value().double_value
         self.logging_file = self.get_parameter('logging_file').get_parameter_value().string_value
         self.twist_stamped = self.get_parameter('twist_stamped').get_parameter_value().integer_value
         self.is_ackermann = self.get_parameter('is_ackermann').get_parameter_value().bool_value
+        self.is_mavros_msg = self.get_parameter('is_mavros_msg').get_parameter_value().bool_value
         self.wheelbase = self.get_parameter('wheelbase').get_parameter_value().double_value
         self.max_steering_angle = self.get_parameter('max_steering_angle').get_parameter_value().double_value
         self.gamma = self.get_parameter('gamma').get_parameter_value().double_value
@@ -53,12 +58,15 @@ class PathFollower(Node):
 
 
         # publishers
-        if self.twist_stamped:
-            self.twist_pub = self.create_publisher(geometry_msgs.msg.TwistStamped, 'cmd_vel', 10)
+        if self.is_mavros_msg:
+            self.mc_pub = self.create_publisher(mavros_msgs.msg.ManualControl, 'mavros/manual_control/send', 10)
         else:
-            self.twist_pub = self.create_publisher(geometry_msgs.msg.Twist, 'cmd_vel', 10)
+            if self.twist_stamped:
+                self.twist_pub = self.create_publisher(geometry_msgs.msg.TwistStamped, 'cmd_vel', 10)
+            else:
+                self.twist_pub = self.create_publisher(geometry_msgs.msg.Twist, 'cmd_vel', 10)
 
-        self.get_logger().info(f'Path follower params: kth = {self.kth}, kt = {self.kt}, kn = {self.kn}, dT = {self.dT}, v_min = {self.v_min}, twist-stamped = {self.twist_stamped}, is_ackermann = {self.is_ackermann}, wheelbase = {self.wheelbase}')
+        self.get_logger().info(f'Path follower params: kth = {self.kth}, kt = {self.kt}, kn = {self.kn}, dT = {self.dT}, v_min = {self.v_min}, twist-stamped = {self.twist_stamped}, is_ackermann = {self.is_ackermann}, is_mavros_msg = {self.is_mavros_msg}, wheelbase = {self.wheelbase}')
 
         # spline objects
         self.x_sp = None
@@ -188,6 +196,9 @@ class PathFollower(Node):
         if self.is_ackermann:
             v_cmd, phi_cmd = self.ackermann_controller(x_ref, y_ref, th_ref)
             om_cmd = phi_cmd # in KTH code, angular velocity command is directly the steering angle command
+
+            v_cmd = np.clip(v_cmd, self.v_min, self.v_max)
+            om_cmd = np.clip(om_cmd, -self.max_steering_angle, self.max_steering_angle)
         else:
             if np.abs(self.v) < self.v_min:
                 th_cmd = self.th
@@ -198,22 +209,31 @@ class PathFollower(Node):
 
                 # get turn rate setpoint
                 om_cmd = self.heading_controller(th_cmd, self.th, om_ref)
-
-        # publish twist message
-        twist_msg = geometry_msgs.msg.Twist()
-        twist_msg.linear.x = v_cmd
-        twist_msg.linear.y = 0.0
-        twist_msg.linear.z = 0.0
-        twist_msg.angular.x = 0.0
-        twist_msg.angular.y = 0.0
-        twist_msg.angular.z = om_cmd
-        if self.twist_stamped:
-            twist_msg_stamped = geometry_msgs.msg.TwistStamped()
-            twist_msg_stamped.header.stamp = self.get_clock().now().to_msg()
-            twist_msg_stamped.twist = twist_msg
-            self.twist_pub.publish(twist_msg_stamped)
+        if self.is_mavros_msg:
+            # publish manual control message
+            mc_msg = mavros_msgs.msg.ManualControl()
+            mc_msg.header.stamp = self.get_clock().now().to_msg()
+            mc_msg.x = 0
+            mc_msg.y = int(om_cmd*1000/self.max_steering_angle) # scale to [-1000, 1000]
+            mc_msg.z = int((1 - (v_cmd - self.v_min)/(self.v_max - self.v_min))*500) # scale to [500, 0]
+            mc_msg.r = 0
+            self.mc_pub.publish(mc_msg)
         else:
-            self.twist_pub.publish(twist_msg)
+            # publish twist message
+            twist_msg = geometry_msgs.msg.Twist()
+            twist_msg.linear.x = v_cmd
+            twist_msg.linear.y = 0.0
+            twist_msg.linear.z = 0.0
+            twist_msg.angular.x = 0.0
+            twist_msg.angular.y = 0.0
+            twist_msg.angular.z = om_cmd
+            if self.twist_stamped:
+                twist_msg_stamped = geometry_msgs.msg.TwistStamped()
+                twist_msg_stamped.header.stamp = self.get_clock().now().to_msg()
+                twist_msg_stamped.twist = twist_msg
+                self.twist_pub.publish(twist_msg_stamped)
+            else:
+                self.twist_pub.publish(twist_msg)
 
         # log
         self.fid.write(f'{self.t} {self.x} {self.y} {self.v} {self.th} {self.om} {x_ref} {y_ref} {v_ref} {th_ref} {om_ref} {v_cmd} {th_cmd} {om_cmd} \n')

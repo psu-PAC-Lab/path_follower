@@ -5,9 +5,11 @@
     h: 1.5 # h > 1
     dT: 0.02 # control period
     v_min: 0.0 # speed threshold for low-speed control laws
+    v_max: 3.0 # maximum speed
     logging_file: 'svea_dyn_logging.txt'
     twist_stamped: 0
     use_sim_time: true
     is_ackermann: true
+    is_mavros_msg: true
     wheelbase: 0.324
     max_steering_angle: 0.785 # 45 degrees in radians
