@@ -19,8 +19,8 @@ class PathFollower(Node):
         super().__init__('path_follower')
 
         # subscribers
-        self.motion_plan_sub = self.create_subscription(dyn_ctrl_msgs.msg.RigidBodyTraj, 'motion_plan', self.motion_plan_callback, 10)
-        self.odom_sub = self.create_subscription(nav_msgs.msg.Odometry, 'mocap', self.odom_callback, 10)
+        self.motion_plan_sub = self.create_subscription(dyn_ctrl_msgs.msg.RigidBodyTraj, '/svea/motion_plan', self.motion_plan_callback, 10)
+        self.odom_sub = self.create_subscription(nav_msgs.msg.Odometry, '/svea/mocap', self.odom_callback, 10)
 
 
         # parameters
@@ -67,7 +67,8 @@ class PathFollower(Node):
                 self.twist_pub = self.create_publisher(geometry_msgs.msg.Twist, 'cmd_vel', 10)
 
         self.get_logger().info(f'Path follower params: kth = {self.kth}, kt = {self.kt}, kn = {self.kn}, dT = {self.dT}, v_min = {self.v_min}, twist-stamped = {self.twist_stamped}, is_ackermann = {self.is_ackermann}, is_mavros_msg = {self.is_mavros_msg}, wheelbase = {self.wheelbase}')
-
+        self.get_logger().info(f'Path follower params: gamma = {self.gamma}, beta = {self.beta}, h = {self.h}')
+        self.get_logger().info(f'Path follower subscribed to {self.motion_plan_sub.topic} for motion plan and {self.odom_sub.topic} for odometry')
         # spline objects
         self.x_sp = None
         self.y_sp = None
@@ -106,6 +107,8 @@ class PathFollower(Node):
     def motion_plan_callback(self, msg):
         # get position, velocity, heading, heading rate from motion plan
         N = len(msg.traj)
+
+        self.get_logger().info(f'Received motion plan')
 
         self.x_plan = np.zeros((N,))
         self.y_plan = np.zeros((N,))
@@ -194,8 +197,8 @@ class PathFollower(Node):
 
         # check for low speed control
         if self.is_ackermann:
-            v_cmd, phi_cmd = self.ackermann_controller(x_ref, y_ref, th_ref)
-            om_cmd = phi_cmd # in KTH code, angular velocity command is directly the steering angle command
+            v_cmd, th_cmd = self.ackermann_controller(x_ref, y_ref, th_ref, v_ref, om_ref)
+            om_cmd = th_cmd # in KTH code, angular velocity command is directly the steering angle command
 
             v_cmd = np.clip(v_cmd, self.v_min, self.v_max)
             om_cmd = np.clip(om_cmd, -self.max_steering_angle, self.max_steering_angle)
@@ -210,14 +213,33 @@ class PathFollower(Node):
                 # get turn rate setpoint
                 om_cmd = self.heading_controller(th_cmd, self.th, om_ref)
         if self.is_mavros_msg:
+            FRONT_DIFF=1000.      # aux1: front diff (-1000..1000)
+            REAR_DIFF=-1000.      # aux2: rear diff (-1000..1000)
+            GEAR=1000.           # aux3: gear (-1000 (high gear)..1000( low gear))
+            AUX4=0.               # aux4: misc servo channel (CH5)
+            AUX5=0.               # aux5: misc servo channel (CH6)
+            AUX6=0.               # aux6: currently unused
+
             # publish manual control message
             mc_msg = mavros_msgs.msg.ManualControl()
             mc_msg.header.stamp = self.get_clock().now().to_msg()
-            mc_msg.x = 0
-            mc_msg.y = int(om_cmd*1000/self.max_steering_angle) # scale to [-1000, 1000]
-            mc_msg.z = int((1 - (v_cmd - self.v_min)/(self.v_max - self.v_min))*500) # scale to [500, 0]
-            mc_msg.r = 0
+            mc_msg.x = float(0)
+            mc_msg.y = -float(om_cmd*1000/self.max_steering_angle) # scale to [-1000, 1000]
+            mc_msg.z = float(500 - ((v_cmd - self.v_min)/(self.v_max - self.v_min))*500) # scale to [500 (v=v_min), 350 (v=v_max)]
+            mc_msg.r = float(0)
+            mc_msg.buttons = int(0)
+            mc_msg.enabled_extensions = int(252)
+            mc_msg.s = 0.
+            mc_msg.t = 0.
+            mc_msg.aux1 = FRONT_DIFF
+            mc_msg.aux2 = REAR_DIFF
+            mc_msg.aux3 = GEAR
+            mc_msg.aux4 = AUX4
+            mc_msg.aux5 = AUX5
+            mc_msg.aux6 = AUX6
+            self.get_logger().info(f'Before mav publish, v_cmd: {v_cmd}, om_cmd: {om_cmd}')
             self.mc_pub.publish(mc_msg)
+            self.get_logger().info(f'After mav publish')
         else:
             # publish twist message
             twist_msg = geometry_msgs.msg.Twist()
@@ -226,7 +248,7 @@ class PathFollower(Node):
             twist_msg.linear.z = 0.0
             twist_msg.angular.x = 0.0
             twist_msg.angular.y = 0.0
-            twist_msg.angular.z = om_cmd
+            twist_msg.angular.z = om_cmd    
             if self.twist_stamped:
                 twist_msg_stamped = geometry_msgs.msg.TwistStamped()
                 twist_msg_stamped.header.stamp = self.get_clock().now().to_msg()
@@ -234,11 +256,10 @@ class PathFollower(Node):
                 self.twist_pub.publish(twist_msg_stamped)
             else:
                 self.twist_pub.publish(twist_msg)
-
         # log
         self.fid.write(f'{self.t} {self.x} {self.y} {self.v} {self.th} {self.om} {x_ref} {y_ref} {v_ref} {th_ref} {om_ref} {v_cmd} {th_cmd} {om_cmd} \n')
 
-    def ackermann_controller(self, x_ref, y_ref, th_ref):
+    def ackermann_controller(self, x_ref, y_ref, th_ref, v_ref, om_ref):
         """
         From "Kinematic trajectory tracking controller for an all-terrain Ackermann steering vehicle"
         by L. Bascetta, D. A. Cucci, M. Matteucci
@@ -252,6 +273,8 @@ class PathFollower(Node):
 
         curvature = np.sin(alpha)/e + self.h*phi*np.sin(alpha)/(e*alpha) + self.beta*alpha/e
 
+        # v_cmd = self.gamma*e + v_ref
+        # phi_cmd = np.arctan(self.wheelbase*curvature) + np.arctan(om_ref*self.wheelbase/(self.v + 1e-9))
         v_cmd = self.gamma*e
         phi_cmd = np.arctan(self.wheelbase*curvature)
         # clip steering angle command

@@ -1,11 +1,11 @@
-/svea/path_follower:
+/path_follower:
   ros__parameters:
-    gamma: 1.0 # gamma > 0
+    gamma: 1.5 # gamma > 0
     beta: 2.1 # 2 < beta < h + 1
     h: 1.5 # h > 1
     dT: 0.02 # control period
-    v_min: 0.0 # speed threshold for low-speed control laws
-    v_max: 3.0 # maximum speed
+    v_min: 0.0
+    v_max: 1.8 # maximum speed in low gear
     logging_file: 'svea_dyn_logging.txt'
     twist_stamped: 0
     use_sim_time: true
