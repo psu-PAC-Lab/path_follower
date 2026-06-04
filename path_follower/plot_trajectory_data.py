@@ -4,6 +4,7 @@ import sys
 
 # get file name
 filename = sys.argv[1]
+# {self.t} {self.x} {self.y} {self.v} {self.th} {self.om} {x_ref} {y_ref} {v_ref} {th_ref} {om_ref} {v_cmd} {th_cmd} {om_cmd} {z_cmd} {y_cmd}
 
 # read data
 t = np.array([])
@@ -20,6 +21,11 @@ om_r = np.array([])
 v_cmd = np.array([])
 th_cmd = np.array([])
 om_cmd = np.array([])
+z_cmd = np.array([])
+y_cmd = np.array([])
+xe = np.array([])
+ye = np.array([])
+theta_e = np.array([])
 # x_path_plan = np.array([])
 # y_path_plan = np.array([])
 # v_path_plan = np.array([])
@@ -45,14 +51,26 @@ with open(filename, 'r') as f:
         v_cmd = np.append(v_cmd, float(data[11]))
         th_cmd = np.append(th_cmd, float(data[12]))
         om_cmd = np.append(om_cmd, float(data[13]))
-        # x_path_plan = np.append(x_path_plan, float(data[14]))
-        # y_path_plan = np.append(y_path_plan, float(data[15]))
-        # v_path_plan = np.append(v_path_plan, float(data[16]))
-        # th_path_plan = np.append(th_path_plan, float(data[17]))
-        # om_path_plan = np.append(om_path_plan, float(data[18]))
+        z_cmd = np.append(z_cmd, float(data[14]))
+        y_cmd = np.append(y_cmd, float(data[15]))
+        xe = np.append(xe, float(data[16]))
+        ye = np.append(ye, float(data[17]))
+        theta_e = np.append(theta_e, float(data[18]))
+        # x_path_plan = np.append(x_path_plan, float(data[16]))
+        # y_path_plan = np.append(y_path_plan, float(data[17]))
+        # v_path_plan = np.append(v_path_plan, float(data[18]))
+        # th_path_plan = np.append(th_path_plan, float(data[19]))
+        # om_path_plan = np.append(om_path_plan, float(data[20]))
 
-# zero time
+# zero time{self.t} {self.x} {self.y} {self.v} {self.th} {self.om} {x_ref} {y_ref} {v_ref} {th_ref} {om_ref} {v_cmd} {th_cmd} {om_cmd} {z_cmd} {y_cmd}
 t = t - t[0]
+
+
+fig, axs = plt.subplots(1,1)
+axs.plot(t, '-k')
+axs.set_title('Time')
+axs.set_xlabel('Index')
+
 
 # plot
 fig, axs = plt.subplots(3,1)
@@ -107,5 +125,37 @@ axs.set_title('Position Trajectory')
 axs.set_aspect('equal', 'box')
 axs.legend(['ref', 'actual', 'path plan'])
 
+
+# plot calculated turning angle
+# omega = v * tan(psi) / L => psi = atan(omega*L/v)
+L = 0.324
+psi = np.arctan(om*L/v)
+fig, axs = plt.subplots(1,1)
+axs.plot(t, psi*(180.0/np.pi), '-k')
+axs.plot(t, om_cmd*(180.0/np.pi), '--r')
+axs.set_ylabel('Steering Angle [deg]')
+axs.set_title('Calculated Steering Angle')
+axs.set_xlabel('Time [s]')
+
+
+e = np.sqrt((x_r - x)**2 + (y_r - y)**2)
+
+fig, axs = plt.subplots(1,1)
+axs.plot(t, z_cmd, '-k')
+axs.set_ylabel('Z Command')
+axs.set_xlabel('Time [s]')
+axs2 = axs.twinx()
+axs2.plot(t, v, '-r')
+axs2.set_ylabel('Velocity [m/s]', color='r')
+axs2.plot(t, e, '-g')
+axs.invert_yaxis()
+
+fig, axs = plt.subplots(1,1)
+axs.plot(t, xe, '-k')
+axs.plot(t, ye, '-r')
+axs.plot(t, theta_e*(180.0/np.pi), '-g')
+axs.set_ylabel('Errors')
+axs.set_xlabel('Time [s]')
+axs.legend(['xe', 'ye', 'theta_e (deg)'])
 
 plt.show()

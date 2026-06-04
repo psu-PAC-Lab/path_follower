@@ -19,8 +19,8 @@ class PathFollower(Node):
         super().__init__('path_follower')
 
         # subscribers
-        self.motion_plan_sub = self.create_subscription(dyn_ctrl_msgs.msg.RigidBodyTraj, 'motion_plan', self.motion_plan_callback, 10)
-        self.odom_sub = self.create_subscription(nav_msgs.msg.Odometry, 'mocap', self.odom_callback, 10)
+        self.motion_plan_sub = self.create_subscription(dyn_ctrl_msgs.msg.RigidBodyTraj, '/svea/motion_plan', self.motion_plan_callback, 10)
+        self.odom_sub = self.create_subscription(nav_msgs.msg.Odometry, '/svea/mocap', self.odom_callback, 10)
 
 
         # parameters
@@ -39,6 +39,12 @@ class PathFollower(Node):
         self.declare_parameter('gamma', 0.0)
         self.declare_parameter('beta', 0.0)
         self.declare_parameter('h', 0.0)
+        self.declare_parameter('dx', 0.0)
+        self.declare_parameter('sigma', 0.0)
+        self.declare_parameter('alpha', 0.0)
+        self.declare_parameter('k1', 0.0)
+        self.declare_parameter('k2', 0.0)
+        self.declare_parameter('k3', 0.0)
 
         self.kth = self.get_parameter('kth').get_parameter_value().double_value
         self.kt = self.get_parameter('kt').get_parameter_value().double_value
@@ -55,6 +61,12 @@ class PathFollower(Node):
         self.gamma = self.get_parameter('gamma').get_parameter_value().double_value
         self.beta = self.get_parameter('beta').get_parameter_value().double_value
         self.h = self.get_parameter('h').get_parameter_value().double_value
+        self.dx = self.get_parameter('dx').get_parameter_value().double_value
+        self.sigma = self.get_parameter('sigma').get_parameter_value().double_value
+        self.alpha = self.get_parameter('alpha').get_parameter_value().double_value
+        self.k1 = self.get_parameter('k1').get_parameter_value().double_value
+        self.k2 = self.get_parameter('k2').get_parameter_value().double_value
+        self.k3 = self.get_parameter('k3').get_parameter_value().double_value
 
 
         # publishers
@@ -67,7 +79,8 @@ class PathFollower(Node):
                 self.twist_pub = self.create_publisher(geometry_msgs.msg.Twist, 'cmd_vel', 10)
 
         self.get_logger().info(f'Path follower params: kth = {self.kth}, kt = {self.kt}, kn = {self.kn}, dT = {self.dT}, v_min = {self.v_min}, twist-stamped = {self.twist_stamped}, is_ackermann = {self.is_ackermann}, is_mavros_msg = {self.is_mavros_msg}, wheelbase = {self.wheelbase}')
-
+        self.get_logger().info(f'Path follower params: gamma = {self.gamma}, beta = {self.beta}, h = {self.h}, dx = {self.dx}, sigma = {self.sigma}, alpha = {self.alpha}, k3 = {self.k3}')
+        self.get_logger().info(f'Path follower subscribed to {self.motion_plan_sub.topic} for motion plan and {self.odom_sub.topic} for odometry')
         # spline objects
         self.x_sp = None
         self.y_sp = None
@@ -106,6 +119,8 @@ class PathFollower(Node):
     def motion_plan_callback(self, msg):
         # get position, velocity, heading, heading rate from motion plan
         N = len(msg.traj)
+
+        self.get_logger().info(f'Received motion plan')
 
         self.x_plan = np.zeros((N,))
         self.y_plan = np.zeros((N,))
@@ -164,6 +179,8 @@ class PathFollower(Node):
     def timer_callback(self):
         if self.t_plan is None or self.x is None:
             self.get_logger().debug('Waiting for motion plan and odometry...')
+            if self.is_mavros_msg:
+                self.pub_mavros_msg(0.05, 0.0)
             return
 
         # get reference position, velocity, heading, heading rate
@@ -172,6 +189,7 @@ class PathFollower(Node):
         v_ref = np.interp(self.t, self.t_plan, self.v_plan)
         th_ref = PathFollower.heading_interp(self.t, self.t_plan, self.th_plan)
         om_ref = np.interp(self.t, self.t_plan, self.om_plan)
+        # a_ref = np.interp(self.t, self.t_plan, np.gradient(self.v_plan, self.t_plan))
 
         self.get_logger().debug(f'x_ref = {x_ref}, y_ref = {y_ref}, v_ref = {v_ref}, th_ref = {th_ref}, om_ref = {om_ref}')
 
@@ -192,10 +210,16 @@ class PathFollower(Node):
         e_th = PathFollower.heading_wrap(th_ref - self.th)
         v_cmd = self.tangential_tracking_controller(e_t, v_ref, e_th)
 
+        z_cmd = 0.0
+        y_cmd = 0.0
+        xe = 0.0
+        ye = 0.0
+        theta_e = 0.0
+
         # check for low speed control
         if self.is_ackermann:
-            v_cmd, phi_cmd = self.ackermann_controller(x_ref, y_ref, th_ref)
-            om_cmd = phi_cmd # in KTH code, angular velocity command is directly the steering angle command
+            v_cmd, th_cmd, xe, ye, theta_e = self.ackermann_controller(x_ref, y_ref, th_ref, v_ref, om_ref)
+            om_cmd = th_cmd # in KTH code, angular velocity command is directly the steering angle command
 
             v_cmd = np.clip(v_cmd, self.v_min, self.v_max)
             om_cmd = np.clip(om_cmd, -self.max_steering_angle, self.max_steering_angle)
@@ -210,14 +234,7 @@ class PathFollower(Node):
                 # get turn rate setpoint
                 om_cmd = self.heading_controller(th_cmd, self.th, om_ref)
         if self.is_mavros_msg:
-            # publish manual control message
-            mc_msg = mavros_msgs.msg.ManualControl()
-            mc_msg.header.stamp = self.get_clock().now().to_msg()
-            mc_msg.x = 0
-            mc_msg.y = int(om_cmd*1000/self.max_steering_angle) # scale to [-1000, 1000]
-            mc_msg.z = int((1 - (v_cmd - self.v_min)/(self.v_max - self.v_min))*500) # scale to [500, 0]
-            mc_msg.r = 0
-            self.mc_pub.publish(mc_msg)
+            z_cmd, y_cmd = self.pub_mavros_msg(v_cmd, om_cmd)
         else:
             # publish twist message
             twist_msg = geometry_msgs.msg.Twist()
@@ -226,7 +243,7 @@ class PathFollower(Node):
             twist_msg.linear.z = 0.0
             twist_msg.angular.x = 0.0
             twist_msg.angular.y = 0.0
-            twist_msg.angular.z = om_cmd
+            twist_msg.angular.z = om_cmd    
             if self.twist_stamped:
                 twist_msg_stamped = geometry_msgs.msg.TwistStamped()
                 twist_msg_stamped.header.stamp = self.get_clock().now().to_msg()
@@ -234,29 +251,91 @@ class PathFollower(Node):
                 self.twist_pub.publish(twist_msg_stamped)
             else:
                 self.twist_pub.publish(twist_msg)
-
         # log
-        self.fid.write(f'{self.t} {self.x} {self.y} {self.v} {self.th} {self.om} {x_ref} {y_ref} {v_ref} {th_ref} {om_ref} {v_cmd} {th_cmd} {om_cmd} \n')
+        self.fid.write(f'{self.t} {self.x} {self.y} {self.v} {self.th} {self.om} {x_ref} {y_ref} {v_ref} {th_ref} {om_ref} {v_cmd} {th_cmd} {om_cmd} {z_cmd} {y_cmd} {xe} {ye} {theta_e}\n')
 
-    def ackermann_controller(self, x_ref, y_ref, th_ref):
+    def ackermann_controller(self, x_ref, y_ref, th_ref, v_ref, om_ref, a_ref=0.0):
         """
         From "Kinematic trajectory tracking controller for an all-terrain Ackermann steering vehicle"
         by L. Bascetta, D. A. Cucci, M. Matteucci
         """
-        delta_x = x_ref - self.x
-        delta_y = y_ref - self.y
+        # delta_x = x_ref - self.x
+        # delta_y = y_ref - self.y
 
-        e = np.sqrt(delta_x**2 + delta_y**2) + 1e-9
-        phi = PathFollower.heading_wrap(np.arctan2(delta_y, delta_x) - th_ref)
-        alpha = PathFollower.heading_wrap(phi - self.th + th_ref + 1e-9)
+        # e = np.sqrt(delta_x**2 + delta_y**2) + 1e-9
+        # phi = PathFollower.heading_wrap(np.arctan2(delta_y, delta_x) - th_ref)
+        # alpha = PathFollower.heading_wrap(phi - self.th + th_ref + 1e-9)
 
-        curvature = np.sin(alpha)/e + self.h*phi*np.sin(alpha)/(e*alpha) + self.beta*alpha/e
+        # curvature = np.sin(alpha)/e + self.h*phi*np.sin(alpha)/(e*alpha) + self.beta*alpha/e
 
-        v_cmd = self.gamma*e
-        phi_cmd = np.arctan(self.wheelbase*curvature)
-        # clip steering angle command
-        phi_cmd = np.clip(phi_cmd, -self.max_steering_angle, self.max_steering_angle)
-        return v_cmd, phi_cmd
+        # # v_cmd = self.gamma*e + v_ref
+        # # phi_cmd = np.arctan(self.wheelbase*curvature) + np.arctan(om_ref*self.wheelbase/(self.v + 1e-9))
+        # v_cmd = self.gamma*e
+        # phi_cmd = np.arctan(self.wheelbase*curvature)
+        # # clip steering angle comm1and
+        # phi_cmd = np.clip(phi_cmd, -self.max_steering_angle, self.max_steering_angle)
+
+        """
+        From "Adaptive Trajectory Tracking for Car-Like Vehicles With Input Constraints"
+        by J. Hu , Y. Zhang, S. Rakheja
+        """
+        xe = np.cos(th_ref)*(x_ref - self.x) + np.sin(th_ref)*(y_ref - self.y)
+        ye = -np.sin(th_ref)*(x_ref - self.x) + np.cos(th_ref)*(y_ref - self.y)
+        theta_e = PathFollower.heading_wrap(th_ref - self.th)
+        ## NON-ADAPTIVE VERSION
+        u1_star = v_ref*np.cos(theta_e) + self.k1*xe
+        y_tilde = ye + self.k2*np.sin(theta_e)/(v_ref + 1e-9)
+        u2_star = (self.k3*y_tilde + 2*v_ref*np.sin(theta_e) + self.k2*np.cos(theta_e)*om_ref/(v_ref + 1e-9) - self.k2*np.sin(theta_e)*a_ref/(v_ref**2 + 1e-9))/(xe + self.k2*np.cos(theta_e)/(v_ref) + 1e-9)
+
+        v_cmd = u1_star
+        phi_cmd = np.arctan(self.wheelbase*u2_star/v_cmd)
+
+        ## ADAPTIVE VERSION
+        # delta_star = self.v_max - v_ref*np.tanh(v_ref/self.sigma)
+        # if np.abs(xe) <= self.dx:
+        #     k1 = -delta_star/(2*self.dx**3*xe**2 + 1e-9) + 3*delta_star/(2*self.dx)
+        # else:
+        #     k1 = delta_star/(np.abs(xe) + 1e-9)
+        
+        # v_cmd = v_ref*np.cos(theta_e) + k1*xe
+        # phi_cmd = np.arctan(self.wheelbase*(self.k3*(ye + self.alpha*np.sin(theta_e)) + 2*v_ref*np.sin(theta_e) - self.alpha*np.cos(theta_e)*om_ref)/(v_cmd*(xe + self.alpha*np.cos(theta_e)) + 1e-9))
+
+        return v_cmd, phi_cmd, xe, ye, theta_e
+
+
+    def pub_mavros_msg(self, v_cmd, om_cmd):
+            FRONT_DIFF=1000.      # aux1: front diff (-1000..1000)
+            REAR_DIFF=-1000.      # aux2: rear diff (-1000..1000)
+            GEAR=1000.           # aux3: gear (-1000 (high gear)..1000( low gear))
+            AUX4=0.               # aux4: misc servo channel (CH5)
+            AUX5=0.               # aux5: misc servo channel (CH6)
+            AUX6=0.               # aux6: currently unused
+
+            y_cmd = -float(om_cmd*1000/self.max_steering_angle) # scale to [-1000, 1000]
+            y_cmd -= 140 # empirically determined trim for straight steering, may need to be adjusted based on testing
+            y_cmd = np.clip(y_cmd, -1000, 1000)
+            z_cmd = float(500 - ((v_cmd - self.v_min)/(self.v_max - self.v_min))*500) # scale to [500 (v=v_min), 350 (v=v_max)]
+
+            # publish manual control message
+            mc_msg = mavros_msgs.msg.ManualControl()
+            mc_msg.header.stamp = self.get_clock().now().to_msg()
+            mc_msg.x = float(0)
+            mc_msg.y = y_cmd
+            mc_msg.z = z_cmd
+            mc_msg.r = float(0)
+            mc_msg.buttons = int(0)
+            mc_msg.enabled_extensions = int(252)
+            mc_msg.s = 0.
+            mc_msg.t = 0.
+            mc_msg.aux1 = FRONT_DIFF
+            mc_msg.aux2 = REAR_DIFF
+            mc_msg.aux3 = GEAR
+            mc_msg.aux4 = AUX4
+            mc_msg.aux5 = AUX5
+            mc_msg.aux6 = AUX6
+            self.get_logger().info(f'Before mav publish, v_cmd: {v_cmd}, om_cmd: {om_cmd}')
+            self.mc_pub.publish(mc_msg)
+            return z_cmd, y_cmd
 
     def tangential_tracking_controller(self, e_t, v_ff, e_th):
         v_cmd = self.kt*e_t*np.cos(e_th) + v_ff

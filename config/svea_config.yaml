@@ -1,15 +1,18 @@
-/svea/path_follower:
+/path_follower:
   ros__parameters:
-    gamma: 1.0 # gamma > 0
-    beta: 2.1 # 2 < beta < h + 1
-    h: 1.5 # h > 1
+    dx: 2.5
+    sigma: 0.3
+    alpha: 0.75
+    k1: 0.8
+    k2: 1.0
+    k3: 0.1
     dT: 0.02 # control period
-    v_min: 0.0 # speed threshold for low-speed control laws
-    v_max: 3.0 # maximum speed
+    v_min: 0.0
+    v_max: 2.0 # maximum speed in low gear
     logging_file: 'svea_dyn_logging.txt'
     twist_stamped: 0
     use_sim_time: true
     is_ackermann: true
     is_mavros_msg: true
     wheelbase: 0.324
-    max_steering_angle: 0.785 # 45 degrees in radians
+    max_steering_angle: 0.611 # 35 degrees in radians
